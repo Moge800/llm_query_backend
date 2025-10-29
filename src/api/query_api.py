@@ -56,7 +56,13 @@ class FaissBackend:
             async with httpx.AsyncClient() as client:
                 resp = await client.post(
                     self.make_url("/knowledge/search"),
-                    params={"text": query, "top_k": top_k, "threshold": 0.5, "min_k": 3, "fallback": True},
+                    params={
+                        "text": query,
+                        "top_k": top_k,
+                        "threshold": 0.5,
+                        "min_k": 3,
+                        "fallback": True,
+                    },
                 )
                 return resp.json().get("results", [])
         except Exception as e:
@@ -104,7 +110,9 @@ class OllamaBackend:
                 return answer
         except Exception as e:
             logger.error(f"[Ollama] 呼び出し失敗: {e}")
-            raise HTTPException(status_code=500, detail="LLM呼び出しで例外が発生しました")
+            raise HTTPException(
+                status_code=500, detail="LLM呼び出しで例外が発生しました"
+            )
 
 
 @asynccontextmanager
@@ -129,7 +137,9 @@ async def lifespan(app: FastAPI):
     # promptテンプレート読込
     template_path = os.getenv("PROMPT_TEMPLATE_PATH", "prompt_template.txt")
     if not os.path.exists(template_path):
-        raise RuntimeError(f"ENV: PROMPT_TEMPLATE_PATH '{template_path}' does not exist.")
+        raise RuntimeError(
+            f"ENV: PROMPT_TEMPLATE_PATH '{template_path}' does not exist."
+        )
 
     with open(template_path, encoding="utf-8") as f:
         app.state.prompt_template = f.read()
@@ -138,7 +148,12 @@ async def lifespan(app: FastAPI):
     # 終了処理（必要ならここに記述）
 
 
-app = FastAPI(title="RAG Query API", description="FAISS + OllamaによるRAG構成", version="1.0.0", lifespan=lifespan)
+app = FastAPI(
+    title="RAG Query API",
+    description="FAISS + OllamaによるRAG構成",
+    version="1.0.0",
+    lifespan=lifespan,
+)
 
 
 def format_references(references: list[dict]) -> str:
@@ -187,7 +202,8 @@ async def run_rag_query(app: FastAPI, query: str, top_k: int) -> QueryResponse:
 
 @app.post("/debug/search")  # , include_in_schema=False)
 async def simple_search(
-    text: str = Query(..., description="検索文字列"), top_k: int = Query(5, description="faiss検索注入件数")
+    text: str = Query(..., description="検索文字列"),
+    top_k: int = Query(5, description="faiss検索注入件数"),
 ) -> JSONResponse:
     """開発・デバッグ用のFAISS検索エンドポイント"""
     logger.debug(f"{text=}")
@@ -230,12 +246,16 @@ async def reload_prompt() -> JSONResponse:
         JSONResponse: _description_
     """
     try:
-        with open(os.getenv("PROMPT_TEMPLATE_PATH", "prompt_template.txt"), encoding="utf-8") as f:
+        with open(
+            os.getenv("PROMPT_TEMPLATE_PATH", "prompt_template.txt"), encoding="utf-8"
+        ) as f:
             app.state.prompt_template = f.read()
         return JSONResponse(content={"status": "reloaded"})
     except Exception as e:
         logger.error(f"[reload_prompt] テンプレート再読込失敗: {e}")
-        raise HTTPException(status_code=500, detail="テンプレート再読込に失敗しました。")
+        raise HTTPException(
+            status_code=500, detail="テンプレート再読込に失敗しました。"
+        )
 
 
 @app.post("/backend/reload")
@@ -312,4 +332,6 @@ async def reload_all() -> JSONResponse:
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host=os.getenv("HOST", "localhost"), port=int(os.getenv("PORT", 8010)))
+    uvicorn.run(
+        app, host=os.getenv("HOST", "localhost"), port=int(os.getenv("PORT", 8010))
+    )
