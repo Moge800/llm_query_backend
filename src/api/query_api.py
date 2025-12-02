@@ -213,11 +213,17 @@ async def simple_search(
     ret = await run_rag_query(app, text, top_k)
     logger.debug(ret.answer)
     try:
-        answer = json.loads(ret.answer)
-        return JSONResponse(content=answer)
-    except Exception as e:
-        logger.debug(f"JSON変換失敗?: {e}")
-        return ret.answer
+        # answerが文字列の場合のみJSON変換を試みる
+        if isinstance(ret.answer, str):
+            answer = json.loads(ret.answer)
+            return JSONResponse(content=answer)
+        else:
+            # 既にdictの場合はそのまま返す
+            return JSONResponse(content=ret.answer)
+    except json.JSONDecodeError as e:
+        logger.debug(f"JSON変換失敗: {e}")
+        # JSON変換失敗時は文字列をそのまま返す
+        return JSONResponse(content={"answer": ret.answer})
 
 
 @app.post("/query", response_model=QueryResponse)
