@@ -36,3 +36,9 @@ dev = [
 ignore_missing_imports = true
 disable_error_code = ["import-untyped"]
 
+[dependency-groups]
+dev = [
+    "black>=25.11.0",
+    "ruff>=0.14.7",
+]
+
