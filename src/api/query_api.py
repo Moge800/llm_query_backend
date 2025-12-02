@@ -23,27 +23,70 @@ logger = logging.getLogger(__name__)
 
 # 入力モデル
 class QueryRequest(BaseModel):
+    """クエリリクエストのデータモデル.
+
+    Attributes:
+        query (str): 検索クエリ文字列。空文字列がデフォルト。
+        top_k (int): FAISS検索で取得する上位k件の結果数。デフォルトは5。
+    """
+
     query: str = ""
     top_k: int = 5
 
 
 # 出力モデル
 class QueryResponse(BaseModel):
+    """クエリレスポンスのデータモデル.
+
+    Attributes:
+        answer (Union[str, Dict[str, Any]]): LLMからの回答。JSON形式または文字列。
+        references (List[Dict[str, Any]]): FAISS検索で取得した参考情報のリスト。
+    """
+
     answer: Union[str, Dict[str, Any]]
     references: List[Dict[str, Any]]
 
 
 class FaissBackend:
+    """FAISSベクトル検索バックエンドクライアント.
+
+    環境変数からFAISSサーバーの接続情報を読み込み、
+    ヘルスチェックと検索機能を提供します。
+
+    Attributes:
+        base (str): FAISSバックエンドのベースURL。
+    """
+
     def __init__(self):
+        """FaissBackendの初期化."""
         self.set_base()
 
     def set_base(self):
+        """環境変数からFAISSバックエンドのベースURLを設定.
+
+        環境変数FAISS_HOSTとFAISS_PORTから接続情報を読み込みます。
+        """
         self.base = f"http://{os.getenv('FAISS_HOST', 'localhost')}:{os.getenv('FAISS_PORT', 8000)}"
 
     def make_url(self, endpoint: str) -> str:
+        """エンドポイントパスから完全なURLを生成.
+
+        Args:
+            endpoint (str): APIエンドポイントパス。
+
+        Returns:
+            str: ベースURLと結合した完全なURL。
+        """
         return urljoin(self.base + "/", endpoint.lstrip("/"))
 
     async def health_check(self) -> bool:
+        """FAISSバックエンドのヘルスチェック.
+
+        /healthエンドポイントにアクセスし、サーバーの状態を確認します。
+
+        Returns:
+            bool: サーバーが正常な場合True、それ以外はFalse。
+        """
         try:
             async with httpx.AsyncClient() as client:
                 resp = await client.get(self.make_url("/health"))
@@ -53,6 +96,21 @@ class FaissBackend:
             return False
 
     async def search(self, query: str, top_k: int) -> List[Dict[str, Any]]:
+        """FAISSベクトル検索を実行.
+
+        クエリ文字列に対してベクトル検索を行い、類似度の高い上位k件の
+        ドキュメントを取得します。
+
+        Args:
+            query (str): 検索クエリ文字列。
+            top_k (int): 取得する上位k件の結果数。
+
+        Returns:
+            List[Dict[str, Any]]: 検索結果のリスト。各要素は参考情報の辞書。
+
+        Raises:
+            HTTPException: 検索に失敗した場合（ステータスコード500）。
+        """
         try:
             async with httpx.AsyncClient() as client:
                 resp = await client.post(
@@ -72,19 +130,53 @@ class FaissBackend:
 
 
 class OllamaBackend:
+    """Ollama LLMバックエンドクライアント.
+
+    環境変数からOllamaサーバーの接続情報とモデル名を読み込み、
+    テキスト生成機能を提供します。
+
+    Attributes:
+        base (str): OllamaバックエンドのベースURL。
+        model (str): 使用するLLMモデル名。
+    """
+
     def __init__(self):
+        """OllamaBackendの初期化.
+
+        Raises:
+            RuntimeError: OLLAMA_LLM_MODEL環境変数が設定されていない場合。
+        """
         self.set_base()
         self.model = os.getenv("OLLAMA_LLM_MODEL")
         if not self.model:
             raise RuntimeError("ENV: OLLAMA_LLM_MODEL is None.")
 
     def set_base(self):
+        """環境変数からOllamaバックエンドのベースURLを設定.
+
+        環境変数OLLAMA_HOSTとOLLAMA_PORTから接続情報を読み込みます。
+        """
         self.base = f"http://{os.getenv('OLLAMA_HOST', 'localhost')}:{os.getenv('OLLAMA_PORT', 11434)}"
 
     def make_url(self, endpoint: str) -> str:
+        """エンドポイントパスから完全なURLを生成.
+
+        Args:
+            endpoint (str): APIエンドポイントパス。
+
+        Returns:
+            str: ベースURLと結合した完全なURL。
+        """
         return urljoin(self.base + "/", endpoint.lstrip("/"))
 
     async def health_check(self) -> bool:
+        """Ollamaバックエンドのヘルスチェック.
+
+        ルートエンドポイントにアクセスし、Ollamaサーバーの状態を確認します。
+
+        Returns:
+            bool: サーバーが正常に動作している場合True、それ以外はFalse。
+        """
         try:
             async with httpx.AsyncClient() as client:
                 resp = await client.get(self.make_url(""))
@@ -94,6 +186,20 @@ class OllamaBackend:
             return False
 
     async def generate(self, prompt: str) -> str:
+        """Ollamaを使用してテキスト生成.
+
+        プロンプトをLLMに送信し、生成されたテキストを取得します。
+        タイムアウトは120秒に設定されています。
+
+        Args:
+            prompt (str): LLMに送信するプロンプト文字列。
+
+        Returns:
+            str: LLMが生成したテキスト。
+
+        Raises:
+            HTTPException: LLM応答が空、またはHTTPエラーが発生した場合。
+        """
         try:
             async with httpx.AsyncClient(timeout=120.0) as client:
                 resp = await client.post(
@@ -120,6 +226,20 @@ class OllamaBackend:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """FastAPIアプリケーションのライフサイクル管理.
+
+    アプリケーション起動時にバックエンドの初期化とヘルスチェックを行い、
+    プロンプトテンプレートを読み込みます。
+
+    Args:
+        app (FastAPI): FastAPIアプリケーションインスタンス。
+
+    Yields:
+        None: アプリケーション実行中。
+
+    Raises:
+        RuntimeError: バックエンドへの接続またはテンプレート読み込みに失敗した場合。
+    """
     # startup処理
     load_dotenv(override=True)
 
@@ -160,6 +280,16 @@ app = FastAPI(
 
 
 def format_references(references: List[Dict[str, Any]]) -> str:
+    """参考情報リストをJSON文字列にフォーマット.
+
+    rankとsimilarity_scoreフィールドを除去し、整形されたJSON文字列を生成します。
+
+    Args:
+        references (List[Dict[str, Any]]): 参考情報の辞書のリスト。
+
+    Returns:
+        str: 整形されたJSON文字列。
+    """
     formatting_references = copy.deepcopy(references)
     for r in formatting_references:
         r.pop("rank", None)
@@ -168,12 +298,39 @@ def format_references(references: List[Dict[str, Any]]) -> str:
 
 
 def build_prompt(template: str, references: str, query: str) -> str:
+    """プロンプトテンプレートから実際のプロンプトを構築.
+
+    テンプレート内の$referencesと$queryを実際の値で置換します。
+
+    Args:
+        template (str): プロンプトテンプレート文字列。
+        references (str): 参考情報のJSON文字列。
+        query (str): ユーザーのクエリ文字列。
+
+    Returns:
+        str: 置換後の完成したプロンプト文字列。
+    """
     # example_prompt = f"{context_text}\n\n質問: {request.query}\n回答:"
     tmpl = string.Template(template)
     return tmpl.safe_substitute(references=references, query=query)
 
 
 async def run_rag_query(app: FastAPI, query: str, top_k: int) -> QueryResponse:
+    """RAG（Retrieval-Augmented Generation）クエリを実行.
+
+    1. FAISSで関連ドキュメントを検索
+    2. 検索結果とクエリからプロンプトを構築
+    3. Ollamaで回答を生成
+    4. 回答をクリーニング・パース
+
+    Args:
+        app (FastAPI): FastAPIアプリケーションインスタンス。
+        query (str): ユーザーのクエリ文字列。
+        top_k (int): FAISS検索で取得する上位k件の結果数。
+
+    Returns:
+        QueryResponse: LLMの回答と参考情報を含むレスポンス。
+    """
     # references整形
     references = await app.state.FB.search(query, top_k)
     logger.debug(json.dumps(references, ensure_ascii=False, indent=2))
@@ -208,7 +365,18 @@ async def simple_search(
     text: str = Query(..., description="検索文字列"),
     top_k: int = Query(5, description="faiss検索注入件数"),
 ) -> JSONResponse:
-    """開発・デバッグ用のFAISS検索エンドポイント"""
+    """開発・デバッグ用のFAISS検索エンドポイント.
+
+    RAGクエリを実行し、結果をJSONレスポンスとして返します。
+    回答がJSON形式の場合はパースして返し、失敗時は文字列として返します。
+
+    Args:
+        text (str): 検索クエリ文字列。
+        top_k (int): 取得する上位k件の結果数。デフォルトは5。
+
+    Returns:
+        JSONResponse: LLMの回答を含むJSONレスポンス。
+    """
     logger.debug(f"{text=}")
     ret = await run_rag_query(app, text, top_k)
     logger.debug(ret.answer)
@@ -228,7 +396,19 @@ async def simple_search(
 
 @app.post("/query", response_model=QueryResponse)
 async def query_rag(request: QueryRequest):
-    """ユーザークエリを受け取り、FAISS検索+Ollama応答を返す"""
+    """ユーザークエリを受け取り、RAG応答を返すメインエンドポイント.
+
+    クエリが空でないことを検証した後、RAGクエリを実行します。
+
+    Args:
+        request (QueryRequest): クエリとtop_kを含むリクエストボディ。
+
+    Returns:
+        QueryResponse: LLMの回答と参考情報。
+
+    Raises:
+        HTTPException: クエリが空の場合（ステータスコード400）。
+    """
     if request.query.strip() == "":
         raise HTTPException(status_code=400, detail="queryが空欄です。")
     return await run_rag_query(app, request.query, request.top_k)
@@ -236,23 +416,28 @@ async def query_rag(request: QueryRequest):
 
 @app.get("/prompt_template")
 async def read_template() -> JSONResponse:
-    """現在のプロンプトテンプレート表示
+    """現在のプロンプトテンプレートを取得.
+
+    アプリケーションが使用しているプロンプトテンプレート文字列を返します。
 
     Returns:
-        JSONResponse: _description_
+        JSONResponse: templateキーにテンプレート文字列を含むJSON。
     """
     return JSONResponse(content={"template": app.state.prompt_template})
 
 
 @app.post("/prompt_template/reload")
 async def reload_prompt() -> JSONResponse:
-    """プロンプトテンプレートの再読込,[PROMPT_TEMPLATE_PATH]を読み込む.
+    """プロンプトテンプレートをファイルから再読み込み.
 
-    Raises:
-        HTTPException: _description_
+    環境変数PROMPT_TEMPLATE_PATHで指定されたファイルから
+    プロンプトテンプレートを再読み込みします。
 
     Returns:
-        JSONResponse: _description_
+        JSONResponse: statusキーに"reloaded"を含むJSON。
+
+    Raises:
+        HTTPException: ファイル読み込みに失敗した場合（ステータスコード500）。
     """
     try:
         with open(
@@ -269,6 +454,17 @@ async def reload_prompt() -> JSONResponse:
 
 @app.post("/backend/reload")
 async def reload_backends() -> JSONResponse:
+    """バックエンド設定を.envから再読み込み.
+
+    .envファイルを再読み込みし、FAISSとOllamaの接続設定を更新します。
+    ヘルスチェックに失敗した場合は設定をロールバックします。
+
+    Returns:
+        JSONResponse: ヘルスチェック結果を含むJSON。
+
+    Raises:
+        HTTPException: 設定の再読み込みまたはヘルスチェックに失敗した場合。
+    """
     try:
         # 現在の設定をバックアップ
         old_faiss_base = app.state.FB.base
@@ -310,6 +506,14 @@ async def reload_backends() -> JSONResponse:
 
 @app.get("/health")
 async def health_check() -> JSONResponse:
+    """アプリケーションとバックエンドのヘルスチェック.
+
+    FAISSとOllamaバックエンドの状態を確認し、総合的なステータスを返します。
+
+    Returns:
+        JSONResponse: 各バックエンドの状態と接続情報を含むJSON。
+            ステータスコードは正常時200、異常時503。
+    """
     faiss_ok = await app.state.FB.health_check()
     ollama_ok = await app.state.OB.health_check()
     status = "ok" if faiss_ok and ollama_ok else "degraded"
@@ -329,6 +533,17 @@ async def health_check() -> JSONResponse:
 
 @app.post("/reload_all")
 async def reload_all() -> JSONResponse:
+    """全設定を一括で再読み込み.
+
+    バックエンド設定とプロンプトテンプレートの両方を再読み込みし、
+    ヘルスチェック結果を返します。
+
+    Returns:
+        JSONResponse: ヘルスチェック結果を含むJSON。
+
+    Raises:
+        HTTPException: 再読み込みに失敗した場合。
+    """
     try:
         await reload_backends()
         await reload_prompt()
