@@ -1,5 +1,42 @@
+# 環境変数
 .env
+
+# プロンプトテンプレート
 prompt_template.txt
+
+# Python
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+.Python
+
+# 仮想環境
 .venv/
+venv/
+ENV/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ログ
+*.log
+
+# テストカバレッジ
+.coverage
+htmlcov/
+.pytest_cache/
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# その他
+*.egg-info/
+dist/
+build/
