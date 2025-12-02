@@ -1,5 +1,6 @@
 import os
 import copy
+from typing import Union, List, Dict, Any
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -28,8 +29,8 @@ class QueryRequest(BaseModel):
 
 # 出力モデル
 class QueryResponse(BaseModel):
-    answer: str | dict
-    references: list
+    answer: Union[str, Dict[str, Any]]
+    references: List[Dict[str, Any]]
 
 
 class FaissBackend:
@@ -51,7 +52,7 @@ class FaissBackend:
             logger.error(f"[FAISS] ヘルスチェック失敗: {e}")
             return False
 
-    async def search(self, query: str, top_k: int) -> list[dict]:
+    async def search(self, query: str, top_k: int) -> List[Dict[str, Any]]:
         try:
             async with httpx.AsyncClient() as client:
                 resp = await client.post(
@@ -65,7 +66,7 @@ class FaissBackend:
                     },
                 )
                 return resp.json().get("results", [])
-        except Exception as e:
+        except (httpx.HTTPError, httpx.ConnectError, httpx.TimeoutException) as e:
             logger.error(f"[FAISS] 検索失敗: {e}")
             raise HTTPException(status_code=500, detail="FAISS検索に失敗しました")
 
@@ -83,12 +84,12 @@ class OllamaBackend:
     def make_url(self, endpoint: str) -> str:
         return urljoin(self.base + "/", endpoint.lstrip("/"))
 
-    async def health_check(self):
+    async def health_check(self) -> bool:
         try:
             async with httpx.AsyncClient() as client:
                 resp = await client.get(self.make_url(""))
                 return resp.status_code == 200 and "Ollama is running" in resp.text
-        except Exception as e:
+        except (httpx.HTTPError, httpx.ConnectError, httpx.TimeoutException) as e:
             logger.error(f"[Ollama] ヘルスチェック失敗: {e}")
             return False
 
@@ -108,7 +109,9 @@ class OllamaBackend:
                     logger.warning("[Ollama] 応答が空です")
                     raise HTTPException(status_code=500, detail="LLM応答が空でした")
                 return answer
-        except Exception as e:
+        except HTTPException:
+            raise
+        except (httpx.HTTPError, httpx.ConnectError, httpx.TimeoutException) as e:
             logger.error(f"[Ollama] 呼び出し失敗: {e}")
             raise HTTPException(
                 status_code=500, detail="LLM呼び出しで例外が発生しました"
@@ -156,7 +159,7 @@ app = FastAPI(
 )
 
 
-def format_references(references: list[dict]) -> str:
+def format_references(references: List[Dict[str, Any]]) -> str:
     formatting_references = copy.deepcopy(references)
     for r in formatting_references:
         r.pop("rank", None)
@@ -251,7 +254,7 @@ async def reload_prompt() -> JSONResponse:
         ) as f:
             app.state.prompt_template = f.read()
         return JSONResponse(content={"status": "reloaded"})
-    except Exception as e:
+    except (OSError, IOError) as e:
         logger.error(f"[reload_prompt] テンプレート再読込失敗: {e}")
         raise HTTPException(
             status_code=500, detail="テンプレート再読込に失敗しました。"
@@ -294,7 +297,7 @@ async def reload_backends() -> JSONResponse:
 
         return await health_check()
 
-    except Exception as e:
+    except (RuntimeError, OSError) as e:
         logger.error(f"[reload_backends] バックエンド再設定失敗: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -324,7 +327,9 @@ async def reload_all() -> JSONResponse:
         await reload_backends()
         await reload_prompt()
         return await health_check()
-    except Exception as e:
+    except HTTPException:
+        raise
+    except (RuntimeError, OSError) as e:
         logger.error(f"[reload_all] 全体再読み込み失敗: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
